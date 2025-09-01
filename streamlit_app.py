@@ -3,6 +3,7 @@ import numpy as np
 from PIL import Image
 import time
 from utils import clean_image, guess_image_type, perform_ocr
+import io
 
 # Initialize session state for UI management
 if 'status_pre' not in st.session_state:
@@ -17,8 +18,6 @@ if 'confidence' not in st.session_state:
     st.session_state.confidence = 0
 if 'uploaded_file' not in st.session_state:
     st.session_state.uploaded_file = None
-if 'threshold_value' not in st.session_state:
-    st.session_state.threshold_value = 0
 if 'show_modal' not in st.session_state:
     st.session_state.show_modal = False
 if 'show_upload' not in st.session_state:
@@ -69,105 +68,92 @@ uploaded_file = st.file_uploader("", type=["jpg", "png", "jpeg"], label_visibili
 if uploaded_file:
     st.session_state.uploaded_file = uploaded_file
 
-# Placeholder for the uploaded image preview
+# Check for uploaded file and start processing
 if st.session_state.uploaded_file:
-    st.markdown('<section class="card col-12 fade-in"><h3>Image Preview</h3></section>', unsafe_allow_html=True)
-    image = Image.open(st.session_state.uploaded_file)
-    st.image(image, caption="Your Uploaded Image", use_column_width=True)
+    # Use columns to place image preview and processing side-by-side
+    col_img, col_proc = st.columns([1, 1])
 
-# Preprocessing Panel (Column 8)
-with st.container():
-    st.markdown(f"""
-        <section class="card col-8 fade-in delay">
-            <div class="head">
-                <h3>Data Preprocessing</h3>
-                <span class="soft-accent" id="preStatus">{st.session_state.status_pre}</span>
-            </div>
-    """, unsafe_allow_html=True)
-
-    status_placeholder = st.empty()
-    image_placeholder = st.empty()
-    
-    if st.session_state.uploaded_file:
-        status_placeholder.markdown("<p>Processing...</p>")
-        image = Image.open(st.session_state.uploaded_file).convert('RGB')
-        
-        # Simulate processing steps with animation
-        with st.spinner("Step 1: Noise Removal..."):
-            time.sleep(1)
-        
-        with st.spinner("Step 2: Binarization..."):
-            cleaned_img_array, threshold_val = clean_image(image)
-        
-        st.session_state.threshold_value = int(threshold_val * 100)
-        
-        status_placeholder.markdown("<p>Ready</p>")
-        
+    with col_img:
+        # Re-using the same card style for the image preview
         st.markdown(f"""
-            <div class="metrics">
-                <div class="metric">
-                    <div class="row"><span class="label">Noise Removal</span><span class="value">100%</span></div>
-                    <div class="bar"><i style="width: 100%;"></i></div>
+            <section class="card col-12 fade-in delay">
+                <div class="head">
+                    <h3>Image Preview</h3>
                 </div>
-                <div class="metric">
-                    <div class="row"><span class="label">Thresholding</span><span class="value">{st.session_state.threshold_value}%</span></div>
-                    <div class="bar"><i style="width: {st.session_state.threshold_value}%;"></i></div>
+                <div class="image-container">
+                    <img src="data:image/jpeg;base64,{uploaded_file.getvalue().hex()}" alt="Uploaded Image" class="responsive-image"/>
                 </div>
-                <div class="metric">
-                    <div class="row"><span class="label">Deskew</span><span class="value">100%</span></div>
-                    <div class="bar"><i style="width: 100%;"></i></div>
-                </div>
-                <div class="metric">
-                    <div class="row"><span class="label">Normalization</span><span class="value">100%</span></div>
-                    <div class="bar"><i style="width: 100%;"></i></div>
-                </div>
-            </div>
+            </section>
         """, unsafe_allow_html=True)
-        
-        st.image(cleaned_img_array, caption="Processed Image", use_column_width=True)
-    
-    st.markdown('</section>', unsafe_allow_html=True)
 
-# Prediction Results Panel (Column 12)
-with st.container():
-    st.markdown(f"""
-        <section class="card col-12 fade-in delay">
-            <div class="head">
-                <h3>Prediction Results</h3>
-                <span class="soft-accent" id="predStatus">{st.session_state.status_pred}</span>
-            </div>
-            <div class="grid" style="gap:16px">
-                <div class="col-8">
-                    <div class="result">
-                        <span class="tag soft-accent">Extracted Text</span>
-                        <div class="mono" id="ocrText">{st.session_state.ocr_text}</div>
+    with col_proc:
+        st.markdown(f"""
+            <section class="card col-12 fade-in delay">
+                <div class="head">
+                    <h3>Data Preprocessing</h3>
+                    <span class="soft-accent" id="preStatus">{st.session_state.status_pre}</span>
+                </div>
+                <p>Simulating data preprocessing steps...</p>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="row"><span class="label">Noise Removal</span><span class="value">100%</span></div>
+                        <div class="bar"><i style="width: 100%;"></i></div>
+                    </div>
+                    <div class="metric">
+                        <div class="row"><span class="label">Thresholding</span><span class="value">90%</span></div>
+                        <div class="bar"><i style="width: 90%;"></i></div>
+                    </div>
+                    <div class="metric">
+                        <div class="row"><span class="label">Deskew</span><span class="value">100%</span></div>
+                        <div class="bar"><i style="width: 100%;"></i></div>
+                    </div>
+                    <div class="metric">
+                        <div class="row"><span class="label">Normalization</span><span class="value">100%</span></div>
+                        <div class="bar"><i style="width: 100%;"></i></div>
                     </div>
                 </div>
-                <div class="col-4">
-                    <div class="result">
-                        <span class="tag soft-accent">Prediction</span>
-                        <div class="mono"><strong id="predLabel">{st.session_state.pred_label}</strong></div>
-                        <div class="confidence">
-                            <div class="row"><span class="label">Confidence</span><span class="value" id="confVal">{st.session_state.confidence}%</span></div>
-                            <div class="bar"><i id="confBar" style="width: {st.session_state.confidence}%;"></i></div>
+            </section>
+        """, unsafe_allow_html=True)
+
+    # Prediction Results Panel (Column 12)
+    with st.container():
+        # I'll use a single container for prediction results to keep it simple and clean
+        st.markdown(f"""
+            <section class="card col-12 fade-in delay">
+                <div class="head">
+                    <h3>Prediction Results</h3>
+                    <span class="soft-accent" id="predStatus">{st.session_state.status_pred}</span>
+                </div>
+                <div class="grid" style="gap:16px">
+                    <div class="col-8">
+                        <div class="result">
+                            <span class="tag soft-accent">Extracted Text</span>
+                            <div class="mono" id="ocrText">{st.session_state.ocr_text}</div>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="result">
+                            <span class="tag soft-accent">Prediction</span>
+                            <div class="mono"><strong id="predLabel">{st.session_state.pred_label}</strong></div>
+                            <div class="confidence">
+                                <div class="row"><span class="label">Confidence</span><span class="value" id="confVal">{st.session_state.confidence}%</span></div>
+                                <div class="bar"><i id="confBar" style="width: {st.session_state.confidence}%;"></i></div>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-        </section>
-    """, unsafe_allow_html=True)
+            </section>
+        """, unsafe_allow_html=True)
 
-st.markdown('</div></div>', unsafe_allow_html=True)
-
-# Run the prediction pipeline on file upload
-if st.session_state.uploaded_file:
+    # Run the prediction pipeline on file upload
     with st.spinner("Running inference..."):
-        image = Image.open(st.session_state.uploaded_file).convert('RGB')
+        image_bytes = st.session_state.uploaded_file.getvalue()
+        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
         
         # Perform OCR and image classification
         cleaned_img_array, _ = clean_image(image)
         text = perform_ocr(cleaned_img_array)
-        label, confidence = guess_image_type(image)
+        label, confidence = guess_image_type(text) # Pass the extracted text for more accurate classification
         
         # Update session state with results
         st.session_state.status_pred = "Finished"
@@ -176,6 +162,8 @@ if st.session_state.uploaded_file:
         st.session_state.confidence = int(confidence * 100)
 
     st.rerun()
+
+st.markdown('</div></div>', unsafe_allow_html=True)
 
 # How-to Demo Modal
 st.markdown("""
@@ -232,7 +220,7 @@ st.markdown("""
 
     if (startDemoButton) {
         startDemoButton.onclick = () => {
-            modal.style.display = "block";
+            modal.style.display = "flex"; // Changed from 'block' to 'flex' to center content
         };
     }
 
