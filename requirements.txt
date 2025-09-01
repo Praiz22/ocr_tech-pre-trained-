@@ -1,8 +1,5 @@
-streamlit
-opencv-python-headless
-pillow
-pandas
-easyocr
-numpy
-torch
-torchvision
+streamlit==1.39.0
+pillow==10.4.0
+pandas==2.2.3
+numpy==2.0.2
+altair==5.4.1
