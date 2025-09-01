@@ -1,19 +1,19 @@
 import streamlit as st
 import base64
 import time
+import io
+from PIL import Image
+import random
 
 # --- UI and Styling ---
 # This section contains the raw HTML and CSS from the UI prototype.
 # It is injected into the Streamlit app using st.markdown.
-# We are placing it here at the top for clarity and to keep the styling together.
-# This approach allows us to use custom, non-Streamlit UI components while
-# still leveraging the Streamlit backend.
 
 custom_ui_html = """
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Praix Tech — OCR UI Prototype</title>
+<title>Praix Tech — OCR UI</title>
 <!-- Chart.js CDN for pie chart -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -151,13 +151,6 @@ custom_ui_html = """
   .btn:hover {
     background-color: var(--brand-2);
     transform: translateY(-1px);
-  }
-  
-  .btn.start-demo {
-    padding: 12px 28px;
-    border-radius: var(--radius-lg);
-    font-size: 16px;
-    margin-top: 24px;
   }
   
   .hero {
@@ -355,9 +348,7 @@ custom_ui_html = """
 </style>
 """
 
-# The JavaScript from the prototype, adjusted to work with Streamlit.
-# Instead of dummy data, it will be used to show/hide sections based on
-# Streamlit's session state.
+# The JavaScript from the prototype
 custom_js = """
 <script>
   function showSection(selector) {
@@ -382,199 +373,193 @@ custom_js = """
 </script>
 """
 
+# --- OCR and Preprocessing Logic (from utils.py) ---
+# In a real-world app, this would be a separate file. For this self-contained
+# Streamlit app, we'll embed the functions here for simplicity.
+
+def preprocess_image(image_bytes: bytes):
+    """
+    Simulates a series of image preprocessing steps for OCR.
+    """
+    # Simulate loading the image from bytes
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+    except Exception as e:
+        print(f"Error opening image: {e}")
+        return None
+
+    # Simulate processing time
+    time.sleep(1) 
+    
+    return image
+
+def perform_ocr(processed_image):
+    """
+    Simulates the OCR process and document classification.
+    """
+    # Simulate processing time
+    time.sleep(2)
+    
+    # --- Simulated Results ---
+    extracted_text = "This is a document containing some text. In a real-world scenario, this would be the actual text extracted by an OCR engine from the image."
+    
+    document_labels = ["Invoice", "Receipt", "Business Card", "Text Document", "Handwritten Note"]
+    predicted_label = random.choice(document_labels)
+    confidence_score = random.randint(85, 99)
+    
+    return {
+        "extracted_text": extracted_text,
+        "prediction_label": predicted_label,
+        "confidence_score": confidence_score
+    }
+
 # --- Streamlit App Logic ---
 
-# We use st.session_state to persist data across reruns of the app
-if 'file_uploaded' not in st.session_state:
-    st.session_state.file_uploaded = False
+# Use st.session_state to persist data across reruns of the app
+if 'processing_state' not in st.session_state:
     st.session_state.processing_state = 0 # 0: idle, 1: processing, 2: done
     st.session_state.extracted_text = "—"
     st.session_state.prediction_label = "—"
     st.session_state.confidence_score = 0
     st.session_state.image_bytes = None
-    st.session_state.show_hero = True
 
 # We use an empty container to hold all our custom UI components,
 # giving us more control over the layout.
 main_container = st.container()
 
 with main_container:
-    # --- Inject the Hero section with a Streamlit button ---
     st.markdown(custom_ui_html, unsafe_allow_html=True)
     
-    if st.session_state.show_hero:
-        # We need a Streamlit button to handle state changes reliably
-        st.markdown("""
-        <div class="hero fade-in">
-          <div class="brand">
-            <div class="logo"></div>
-            <div>
-              <div class="title">Praix Tech — OCR Lab</div>
-              <div class="subtitle">Futuristic UI Prototype • Upload → Preprocess → Predict</div>
+    # --- Main Title and Upload Section ---
+    st.markdown("""
+        <div style="text-align:center; padding: 24px;">
+            <div class="brand">
+                <div class="logo"></div>
+                <div>
+                    <div class="title">Praix Tech — OCR Lab</div>
+                    <div class="subtitle">Image to text and document classification</div>
+                </div>
             </div>
-          </div>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+        <section class="card col-12 fade-in delay">
+            <div class="head">
+                <h3>Upload Image</h3>
+                <span class="soft-accent">10s processing budget</span>
+            </div>
+        </section>
+    """, unsafe_allow_html=True)
+
+    uploaded_file = st.file_uploader("", type=["png", "jpg", "jpeg"], label_visibility="collapsed")
+
+    if uploaded_file is not None:
+        st.session_state.processing_state = 1
+        st.session_state.image_bytes = uploaded_file.getvalue()
+        
+        # Process the image and get results
+        with st.spinner('Processing...'):
+            processed_image = preprocess_image(st.session_state.image_bytes)
+            if processed_image:
+                results = perform_ocr(processed_image)
+                st.session_state.extracted_text = results["extracted_text"]
+                st.session_state.prediction_label = results["prediction_label"]
+                st.session_state.confidence_score = results["confidence_score"]
+                st.session_state.processing_state = 2
+        
+        st.rerun()
+
+    # --- Display UI sections based on state ---
+    if st.session_state.processing_state > 0:
+        # Generate the base64 data URL for the image
+        b64_image = base64.b64encode(st.session_state.image_bytes).decode("utf-8")
+        image_src = f"data:image/png;base64,{b64_image}"
+
+        # --- Image Preview & Preprocessing Panel ---
+        st.markdown(f"""
+        <div class="grid">
+          <section class="card col-6 fade-in delay" id="preview-section">
+            <div class="head">
+              <h3>Image Preview</h3>
+              <span class="soft-accent" id="preview-status">{'Processing...' if st.session_state.processing_state == 1 else 'Complete'}</span>
+            </div>
+            <div class="image-container">
+              <img id="uploadedImage" class="responsive-image" src="{image_src}" alt="Uploaded Image Preview"/>
+            </div>
+          </section>
+
+          <section class="card col-6 fade-in delay" id="preprocessing-section">
+            <div class="head">
+              <h3>Data Preprocessing</h3>
+              <span class="soft-accent" id="preStatus">{'Processing...' if st.session_state.processing_state == 1 else 'Complete'}</span>
+            </div>
+            <p>Simulating data preprocessing steps...</p>
+            <div class="metrics">
+              <div class="metric">
+                <div class="row"><span class="label">Noise Removal</span><span class="value" id="nrVal">100%</span></div>
+                <div class="bar"><i id="nrBar" style="width: 100%;"></i></div>
+              </div>
+              <div class="metric">
+                <div class="row"><span class="label">Thresholding</span><span class="value" id="threshVal">100%</span></div>
+                <div class="bar"><i id="threshBar" style="width: 100%;"></i></div>
+              </div>
+              <div class="metric">
+                <div class="row"><span class="label">Deskew</span><span class="value" id="deskewVal">100%</span></div>
+                <div class="bar"><i id="deskewBar" style="width: 100%;"></i></div>
+              </div>
+              <div class="metric">
+                <div class="row"><span class="label">Normalization</span><span class="value" id="normVal">100%</span></div>
+                <div class="bar"><i id="normBar" style="width: 100%;"></i></div>
+              </div>
+            </div>
+          </section>
         </div>
         """, unsafe_allow_html=True)
         
-        # We use a button to change the state and hide the hero section
-        # The CSS for this button is injected via markdown to match the prototype
-        st.markdown("""
-        <style>
-            div.stButton > button {
-                padding: 12px 28px;
-                border-radius: var(--radius-lg);
-                font-size: 16px;
-                margin-top: 24px;
-                background-color: var(--brand);
-                color: white;
-                font-weight: 500;
-                transition: background-color 0.2s ease, transform 0.2s ease;
-                border: none;
-                cursor: pointer;
-            }
-            div.stButton > button:hover {
-                background-color: var(--brand-2);
-                transform: translateY(-1px);
-            }
-        </style>
-        """, unsafe_allow_html=True)
-        if st.button("Start Demo"):
-            st.session_state.show_hero = False
-            st.rerun()
-    else:
-        # --- Upload Panel ---
-        st.markdown("""
-        <section class="card col-12 fade-in delay">
+        # --- Prediction Results Panel ---
+        st.markdown(f"""
+        <section class="card col-12 fade-in delay" id="results-section">
           <div class="head">
-            <h3>Upload Image</h3>
-            <span class="soft-accent">10s processing budget</span>
+            <h3>Prediction Results</h3>
+            <span class="soft-accent" id="predStatus">{'Running inference...' if st.session_state.processing_state == 1 else 'Done'}</span>
+          </div>
+          <div class="grid" style="gap:16px">
+            <div class="col-8">
+              <div class="result">
+                <span class="tag soft-accent">Extracted Text</span>
+                <div class="mono" id="ocrText">{st.session_state.extracted_text}</div>
+              </div>
+            </div>
+            <div class="col-4">
+              <div class="result">
+                <span class="tag soft-accent">Prediction</span>
+                <div class="mono"><strong id="predLabel">{st.session_state.prediction_label}</strong></div>
+                <div class="confidence">
+                  <div class="row"><span class="label">Confidence</span><span class="value" id="confVal">{st.session_state.confidence_score}%</span></div>
+                  <div class="bar"><i id="confBar" style="width: {st.session_state.confidence_score}%;"></i></div>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
         """, unsafe_allow_html=True)
-
-        uploaded_file = st.file_uploader("", type=["png", "jpg", "jpeg"], label_visibility="collapsed")
-
-        if uploaded_file is not None:
-            st.session_state.file_uploaded = True
-            st.session_state.processing_state = 1
-            st.session_state.image_bytes = uploaded_file.getvalue()
-            
-            with st.spinner('Processing...'):
-                time.sleep(3) 
-
-            # Fake results
-            st.session_state.processing_state = 2
-            st.session_state.extracted_text = "This is some extracted text from your image. "
-            st.session_state.prediction_label = "Text Document"
-            st.session_state.confidence_score = 92
-            
-            st.rerun()
-
-        if st.session_state.file_uploaded:
-            # Generate the base64 data URL for the image
-            b64_image = base64.b64encode(st.session_state.image_bytes).decode("utf-8")
-            image_src = f"data:image/png;base64,{b64_image}"
-
-            # --- Image Preview & Preprocessing Panel ---
-            st.markdown(f"""
-            <div class="grid">
-              <section class="card col-6 fade-in delay" id="preview-section">
-                <div class="head">
-                  <h3>Image Preview</h3>
-                  <span class="soft-accent" id="preview-status">{'Processing...' if st.session_state.processing_state == 1 else 'Complete'}</span>
-                </div>
-                <div class="image-container">
-                  <img id="uploadedImage" class="responsive-image" src="{image_src}" alt="Uploaded Image Preview"/>
-                </div>
-              </section>
-
-              <section class="card col-6 fade-in delay" id="preprocessing-section">
-                <div class="head">
-                  <h3>Data Preprocessing</h3>
-                  <span class="soft-accent" id="preStatus">{'Processing...' if st.session_state.processing_state == 1 else 'Complete'}</span>
-                </div>
-                <p>Simulating data preprocessing steps...</p>
-                <div class="metrics">
-                  <div class="metric">
-                    <div class="row"><span class="label">Noise Removal</span><span class="value" id="nrVal">100%</span></div>
-                    <div class="bar"><i id="nrBar" style="width: 100%;"></i></div>
-                  </div>
-                  <div class="metric">
-                    <div class="row"><span class="label">Thresholding</span><span class="value" id="threshVal">100%</span></div>
-                    <div class="bar"><i id="threshBar" style="width: 100%;"></i></div>
-                  </div>
-                  <div class="metric">
-                    <div class="row"><span class="label">Deskew</span><span class="value" id="deskewVal">100%</span></div>
-                    <div class="bar"><i id="deskewBar" style="width: 100%;"></i></div>
-                  </div>
-                  <div class="metric">
-                    <div class="row"><span class="label">Normalization</span><span class="value" id="normVal">100%</span></div>
-                    <div class="bar"><i id="normBar" style="width: 100%;"></i></div>
-                  </div>
-                </div>
-              </section>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Only show results when processing is done
-            if st.session_state.processing_state == 2:
-                # --- Prediction Results Panel ---
-                st.markdown(f"""
-                <section class="card col-12 fade-in delay" id="results-section">
-                  <div class="head">
-                    <h3>Prediction Results</h3>
-                    <span class="soft-accent" id="predStatus">Done</span>
-                  </div>
-                  <div class="grid" style="gap:16px">
-                    <div class="col-8">
-                      <div class="result">
-                        <span class="tag soft-accent">Extracted Text</span>
-                        <div class="mono" id="ocrText">{st.session_state.extracted_text}</div>
-                      </div>
-                    </div>
-                    <div class="col-4">
-                      <div class="result">
-                        <span class="tag soft-accent">Prediction</span>
-                        <div class="mono"><strong id="predLabel">{st.session_state.prediction_label}</strong></div>
-                        <div class="confidence">
-                          <div class="row"><span class="label">Confidence</span><span class="value" id="confVal">{st.session_state.confidence_score}%</span></div>
-                          <div class="bar"><i id="confBar" style="width: {st.session_state.confidence_score}%;"></i></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-                """, unsafe_allow_html=True)
-            else:
-                # Placeholder for results during processing to keep layout stable
-                st.markdown("""
-                <section class="card col-12 fade-in delay" id="results-section">
-                  <div class="head">
-                    <h3>Prediction Results</h3>
-                    <span class="soft-accent" id="predStatus">Waiting for processing...</span>
-                  </div>
-                  <div style="height: 200px; display: flex; align-items: center; justify-content: center;">
-                    <div class="animated-dots">
-                      <span></span><span></span><span></span>
-                    </div>
-                  </div>
-                </section>
-                """, unsafe_allow_html=True)
-        
-        # --- How-to Demo Modal ---
-        st.markdown(f"""
-        <div class="modal-overlay" id="modal-overlay" style="display:{'flex' if st.session_state.get('show_modal') else 'none'};">
-          <div class="modal">
-            <div class="modal-header">
-              <h3>How to Use</h3>
-              <span class="modal-close-btn" onclick="document.getElementById('modal-overlay').style.display='none';">×</span>
-            </div>
-            <div class="modal-body">
-              <p><strong>1. Upload Image:</strong> Click 'Choose File' or drag and drop an image of a document or text.</p>
-              <p><strong>2. Watch it Process:</strong> The app will show a live-action stream of data preprocessing and analysis.</p>
-              <p><strong>3. See the Results:</strong> The final extracted text, a predicted document type, and a confidence score will be displayed.</p>
-            </div>
-          </div>
+    
+    # --- How-to Demo Modal ---
+    # This modal is initially hidden and can be controlled via JS if needed
+    st.markdown(f"""
+    <div class="modal-overlay" id="modal-overlay" style="display:none;">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>How to Use</h3>
+          <span class="modal-close-btn" onclick="document.getElementById('modal-overlay').style.display='none';">×</span>
         </div>
-        """, unsafe_allow_html=True)
-        st.markdown(custom_js, unsafe_allow_html=True)
+        <div class="modal-body">
+          <p><strong>1. Upload Image:</strong> Click 'Choose File' or drag and drop an image of a document or text.</p>
+          <p><strong>2. Watch it Process:</strong> The app will show a live-action stream of data preprocessing and analysis.</p>
+          <p><strong>3. See the Results:</strong> The final extracted text, a predicted document type, and a confidence score will be displayed.</p>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown(custom_js, unsafe_allow_html=True)
