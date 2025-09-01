@@ -4,7 +4,7 @@ from PIL import Image
 import pandas as pd
 import altair as alt
 import time
-from utils import clean_image, guess_image_type
+from utils import clean_image, guess_image_type, perform_ocr
 
 # Initialize session state for UI management
 if 'status_pre' not in st.session_state:
@@ -74,14 +74,14 @@ with st.container():
             </div>
     """, unsafe_allow_html=True)
 
-    st.session_state.status_container = st.empty()
-    
     # Placeholder for displaying the processed image
     if st.session_state.uploaded_file:
         image = Image.open(st.session_state.uploaded_file).convert('RGB')
         
         with st.spinner("Processing..."):
-            cleaned_img_array = clean_image(image)
+            cleaned_img_array, threshold_val = clean_image(image)
+        
+        st.session_state.threshold_value = int(threshold_val * 100)
         
         chart_data = pd.DataFrame({
             "Applied": [st.session_state.threshold_value],
@@ -159,17 +159,55 @@ st.markdown('</div></div>', unsafe_allow_html=True)
 if st.session_state.uploaded_file:
     with st.spinner("Running inference..."):
         image = Image.open(st.session_state.uploaded_file).convert('RGB')
-        cleaned_img_array = clean_image(image)
         
-        # Get predictions without a model
-        text = "Hello Praix - Futuristic OCR UI 💫"
-        label = "Document"
-        confidence = 0.93
+        # Perform OCR and image classification
+        cleaned_img_array, _ = clean_image(image)
+        text = perform_ocr(cleaned_img_array)
+        label, confidence = guess_image_type(image)
         
         # Update session state with results
         st.session_state.status_pred = "Finished"
-        st.session_state.ocr_text = text
+        st.session_state.ocr_text = text if text else "No text found."
         st.session_state.pred_label = label
         st.session_state.confidence = int(confidence * 100)
 
     st.rerun()
+
+# Add JavaScript to link the custom buttons and styling to the Streamlit components
+st.markdown("""
+<script>
+    const filePicker = parent.document.querySelector('.stFileUploader > div > label > button');
+    const pickFileButton = document.querySelector('.pick-file');
+    const dropZone = document.querySelector('.drop');
+
+    if (filePicker && pickFileButton) {
+        pickFileButton.onclick = () => {
+            filePicker.click();
+        };
+    }
+
+    if (dropZone && filePicker) {
+        dropZone.ondragover = (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        };
+
+        dropZone.ondragleave = () => {
+            dropZone.classList.remove('dragover');
+        };
+
+        dropZone.ondrop = (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            // The dropped file is already handled by Streamlit's file_uploader
+        };
+    }
+
+    const startDemoButton = document.querySelector('.start-demo');
+    if (startDemoButton && filePicker) {
+        startDemoButton.onclick = () => {
+            filePicker.click();
+        };
+    }
+</script>
+""", unsafe_allow_html=True)
