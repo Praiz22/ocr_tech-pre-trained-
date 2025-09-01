@@ -1,88 +1,69 @@
+import cv2
 import numpy as np
 import easyocr
 from PIL import Image
-from transformers import ViTImageProcessor, ViTForImageClassification
-import torch
-import streamlit as st
 
-# Initialize EasyOCR reader. It will download the model the first time it's run.
-# The `@st.cache_resource` decorator caches the resource to prevent re-initializing
-# the reader every time the app reruns.
-@st.cache_resource
-def get_ocr_reader():
-    return easyocr.Reader(['en'])
-
-reader = get_ocr_reader()
-
-# Load the pre-trained model and processor from Hugging Face
-# This model is pre-trained on a large dataset and does not require training.
-processor = ViTImageProcessor.from_pretrained('google/vit-base-patch16-224')
-model = ViTForImageClassification.from_pretrained('google/vit-base-patch16-224')
-
-# A dictionary to map the model's predicted ID to a human-readable label
-# The labels here are simplified for the purpose of the demo
-# In a real-world scenario, you would inspect the model's labels and create a comprehensive map
-LABEL_MAP = {
-    'document': ['notebook', 'paper', 'textbook'],
-    'photo': ['photo', 'image', 'picture'],
-    'diagram': ['diagram', 'chart', 'graph'],
-    'unknown': ['n04522168', 'n04522292', 'n04522378', 'n04522409', 'n04522533', 'n04522568', 'n04522618', 'n04522650', 'n04522695', 'n04522730']
-}
-
-def clean_image(image: Image.Image):
+def clean_image(image: Image):
     """
-    Cleans up the image by converting it to grayscale and applying a threshold.
-    This improves OCR accuracy.
+    Cleans an image for OCR by converting to grayscale, applying a binary threshold,
+    and performing noise removal. Returns the processed image as a NumPy array.
     """
+    # Convert PIL Image to a NumPy array for OpenCV
+    np_image = np.array(image)
+    
     # Convert to grayscale
-    grayscale_image = image.convert('L')
+    gray = cv2.cvtColor(np_image, cv2.COLOR_BGR2GRAY)
     
-    # Calculate an automatic threshold value
-    # You can also use a fixed value like 128
-    threshold = np.mean(np.array(grayscale_image))
+    # Apply a binary threshold
+    _, thresholded = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
     
-    # Apply thresholding
-    binarized_image = grayscale_image.point(lambda x: 0 if x < threshold else 255, '1')
+    # Simple noise removal (optional but can help)
+    denoised = cv2.fastNlMeansDenoising(thresholded, None, 10, 7, 21)
     
-    return binarized_image, threshold / 255.0
+    return denoised, 0.9 # Return a mock threshold value for the UI
 
-def perform_ocr(image: Image.Image) -> str:
+def perform_ocr(image_array: np.ndarray):
     """
-    Performs OCR on the given image using EasyOCR.
+    Performs OCR on a pre-processed image array using EasyOCR.
     """
-    try:
-        results = reader.readtext(np.array(image))
-        text = " ".join([result[1] for result in results])
-        return text.strip()
-    except Exception as e:
-        return f"An error occurred during OCR: {e}"
+    reader = easyocr.Reader(['en'], gpu=False)
+    results = reader.readtext(image_array)
+    
+    # Extract text from results
+    extracted_text = " ".join([result[1] for result in results])
+    
+    return extracted_text
 
-def guess_image_type(image: Image.Image):
+def guess_image_type(text: str):
     """
-    Classifies the image using a pre-trained Vision Transformer model.
+    Classifies the document type based on extracted text using a keyword-based scoring system.
     """
-    try:
-        # Resize image to model's expected input size
-        inputs = processor(images=image, return_tensors="pt")
+    text_lower = text.lower()
+    
+    # Define a dictionary of keywords for common document types
+    document_keywords = {
+        'Invoice': ['invoice', 'bill to', 'due date', 'subtotal', 'total'],
+        'Receipt': ['receipt', 'thank you', 'total', 'tax', 'cash', 'credit'],
+        'Report': ['report', 'summary', 'data analysis', 'conclusion', 'introduction'],
+        'Form': ['name', 'address', 'date', 'signature', 'form'],
+        'ID Card': ['id card', 'passport', 'date of birth', 'id number', 'nationality'],
+    }
+    
+    # Initialize classification result
+    best_match = 'Text Document'
+    highest_score = 0
+    
+    # Count keyword occurrences and determine confidence
+    for doc_type, keywords in document_keywords.items():
+        score = sum(1 for keyword in keywords if keyword in text_lower)
         
-        # Get model predictions
-        with torch.no_grad():
-            outputs = model(**inputs)
-        
-        # Get predicted class ID and confidence
-        logits = outputs.logits
-        predicted_class_idx = logits.argmax(-1).item()
-        confidence = torch.nn.functional.softmax(logits, dim=-1)[0][predicted_class_idx].item()
-        
-        # Get the label from the model's vocabulary
-        predicted_label = model.config.id2label[predicted_class_idx]
-        
-        # Map to a simplified label for the UI
-        for key, labels in LABEL_MAP.items():
-            if any(l in predicted_label for l in labels):
-                return key.capitalize(), confidence
-        
-        # Return the original label if no match is found
-        return predicted_label, confidence
-    except Exception as e:
-        return "Error", 0.0
+        if score > highest_score:
+            highest_score = score
+            best_match = doc_type
+            
+    # Calculate confidence based on keyword matches
+    # This is a heuristic, not a true confidence score
+    confidence = highest_score / len(text_lower.split()) if text_lower and len(text_lower.split()) > 0 else 0
+    confidence = min(0.99, confidence * 10) # Scale and cap the confidence for better UI representation
+    
+    return best_match, confidence
