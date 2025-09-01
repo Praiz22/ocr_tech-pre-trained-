@@ -1,142 +1,175 @@
 import streamlit as st
 import numpy as np
-from PIL import Image, ImageFilter
-import time
+from PIL import Image
 import pandas as pd
 import altair as alt
+import time
+from utils import clean_image, guess_image_type
 
-# Load the app’s style
+# Initialize session state for UI management
+if 'status_pre' not in st.session_state:
+    st.session_state.status_pre = "Waiting for input"
+if 'status_pred' not in st.session_state:
+    st.session_state.status_pred = "Waiting for input"
+if 'ocr_text' not in st.session_state:
+    st.session_state.ocr_text = "—"
+if 'pred_label' not in st.session_state:
+    st.session_state.pred_label = "—"
+if 'confidence' not in st.session_state:
+    st.session_state.confidence = 0
+if 'uploaded_file' not in st.session_state:
+    st.session_state.uploaded_file = None
+if 'threshold_value' not in st.session_state:
+    st.session_state.threshold_value = 0
+
+# Load the app’s style from an external CSS file
 with open("style.css") as f:
     st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
-# Header
+# Hero Section
 st.markdown("""
-    <header class="header">
-        <div class="branding">Praix Tech — OCR Lab</div>
-        <div class="subtitle">Futuristic UI Prototype • Upload → Preprocess → Predict</div>
-    </header>
-    <button class="start-demo">Start Demo</button>
+    <div class="glow"></div>
+    <div class="shell">
+        <div class="hero fade-in">
+            <div class="brand">
+                <div class="logo"></div>
+                <div>
+                    <div class="title">Praix Tech — OCR Lab</div>
+                    <div class="subtitle">Futuristic UI Prototype • Upload → Preprocess → Predict</div>
+                </div>
+            </div>
+            <button class="btn start-demo">Start Demo</button>
+        </div>
+    </div>
 """, unsafe_allow_html=True)
 
-# Clean up the image
-def clean_image(image):
-    image = image.convert('L')  # Grayscale
-    image = image.filter(ImageFilter.MedianFilter(size=5))  # Smooth noise
-    image_array = np.array(image)
-    threshold = 128
-    image_array = np.where(image_array < threshold, 0, 255).astype(np.uint8)
-    image = Image.fromarray(image_array).resize((128, 128))
-    return np.array(image) / 255.0
+# Grid layout
+st.markdown('<div class="grid">', unsafe_allow_html=True)
 
-# Guess image type
-def guess_image_type(image):
-    text_amount = np.mean(image < 0.5)
-    if text_amount > 0.3:
-        return "documents", 0.9
-    elif text_amount > 0.1:
-        return "screenshots", 0.85
-    return "pictures", 0.8
+# Upload Panel (Column 12)
+with st.container():
+    st.markdown("""
+        <section class="card col-12 fade-in">
+            <div class="head">
+                <h3>Upload Image</h3>
+                <span class="soft-accent">10s processing budget</span>
+            </div>
+            <div class="drop">
+                <p><strong>Drag & Drop</strong> an image here or <button class="btn pick-file">Choose File</button></p>
+            </div>
+        </section>
+    """, unsafe_allow_html=True)
 
-# Placeholder text detection
-def read_text(image):
-    image_array = np.array(image.convert('L'))
-    text_amount = np.mean(image_array < 128)
-    if text_amount > 0.3:
-        return "Text detected (basic analysis)", 0.9
-    return "No text found", 0.8
-
-# Upload section
-st.markdown('<section class="section-upload card fade-in">', unsafe_allow_html=True)
-st.markdown("<h2>Upload Image</h2>", unsafe_allow_html=True)
-st.markdown("<p>10s processing budget</p>", unsafe_allow_html=True)
-st.markdown("<div class='upload-area'>Drag & Drop an image here or Choose File</div>", unsafe_allow_html=True)
 uploaded_file = st.file_uploader("", type=["jpg", "png", "jpeg"], label_visibility="collapsed")
+if uploaded_file:
+    st.session_state.uploaded_file = uploaded_file
 
-if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert('RGB')
-    st.image(image, caption="Your Image", use_column_width=True)
+# Preprocessing Panel (Column 8)
+with st.container():
+    st.markdown(f"""
+        <section class="card col-8 fade-in delay">
+            <div class="head">
+                <h3>Data Preprocessing</h3>
+                <span class="soft-accent" id="preStatus">{st.session_state.status_pre}</span>
+            </div>
+    """, unsafe_allow_html=True)
 
-    start_time = time.time()
-    cleaned_img = clean_image(image)
+    st.session_state.status_container = st.empty()
+    
+    # Placeholder for displaying the processed image
+    if st.session_state.uploaded_file:
+        image = Image.open(st.session_state.uploaded_file).convert('RGB')
+        
+        with st.spinner("Processing..."):
+            cleaned_img_array = clean_image(image)
+        
+        chart_data = pd.DataFrame({
+            "Applied": [st.session_state.threshold_value],
+            "Remaining": [100 - st.session_state.threshold_value]
+        })
+        
+        chart = alt.Chart(chart_data).mark_arc(outerRadius=50).encode(
+            theta=alt.Theta("value", stack=True),
+            color=alt.Color("variable", scale=alt.Scale(range=["#ff7a18", "#f0f0f0"])),
+        ).properties(width=120, height=120)
+        
+        st.markdown(f"""
+            <div class="metrics">
+                <div class="metric">
+                    <div class="row"><span class="label">Noise Removal</span><span class="value">100%</span></div>
+                    <div class="bar"><i style="width: 100%;"></i></div>
+                </div>
+                <div class="metric chart-card">
+                    <div class="row" style="width:100%;justify-content:space-between;align-items:center;">
+                        <span class="label">Thresholding</span><span class="value">{st.session_state.threshold_value}%</span>
+                    </div>
+                    <div class="chart-wrap">
+                        <div id="thresholdChart"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <div class="row"><span class="label">Deskew</span><span class="value">100%</span></div>
+                    <div class="bar"><i style="width: 100%;"></i></div>
+                </div>
+                <div class="metric">
+                    <div class="row"><span class="label">Normalization</span><span class="value">100%</span></div>
+                    <div class="bar"><i style="width: 100%;"></i></div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        st.altair_chart(chart)
 
-    # Preprocessing section
-    st.markdown('<section class="section-preprocess card fade-in">', unsafe_allow_html=True)
-    st.markdown("<h2>Data Preprocessing</h2>", unsafe_allow_html=True)
-    st.markdown("<p class='status'>Processing...</p>", unsafe_allow_html=True)
-
-    steps = ["Noise Removal", "Thresholding", "Deskew", "Normalization"]
-    for step in steps:
-        step_progress = st.progress(0)
-        time.sleep(0.1)
-        st.markdown(f"<div class='step'>{step}<span>100%</span><div class='progress-bar full'></div></div>", unsafe_allow_html=True)
-        step_progress.progress(1.0)
-
-    st.markdown("<p class='chart-label'>Applied vs Remaining</p>", unsafe_allow_html=True)
-    chart_data = pd.DataFrame({"Applied": [70], "Remaining": [30]})
-    chart = alt.Chart(chart_data).mark_bar().encode(
-        x=alt.X('variable:N', title=None, axis=alt.Axis(labels=False)),
-        y=alt.Y('value:Q', title=None),
-        color=alt.Color('variable:N', scale=alt.Scale(range=["#00ff00", "#00ff00"]), legend=None)
-    ).transform_melt(
-        id_vars=[],
-        value_vars=["Applied", "Remaining"]
-    ).properties(
-        width=200,
-        height=100
-    )
-    st.altair_chart(chart, use_container_width=True)
-
-    st.markdown("<p class='status'>Ready</p>", unsafe_allow_html=True)
-    st.image(cleaned_img, caption="Processed Image", use_column_width=True)
+        st.image(cleaned_img_array, caption="Processed Image", use_column_width=True)
+    
     st.markdown('</section>', unsafe_allow_html=True)
 
-    # Results section
-    st.markdown('<section class="section-prediction card fade-in">', unsafe_allow_html=True)
-    st.markdown("<h2>Prediction Results</h2>", unsafe_allow_html=True)
-    st.markdown("<p class='status'>Analyzing...</p>", unsafe_allow_html=True)
+# Prediction Results Panel (Column 12)
+with st.container():
+    st.markdown(f"""
+        <section class="card col-12 fade-in delay">
+            <div class="head">
+                <h3>Prediction Results</h3>
+                <span class="soft-accent" id="predStatus">{st.session_state.status_pred}</span>
+            </div>
+            <div class="grid" style="gap:16px">
+                <div class="col-8">
+                    <div class="result">
+                        <span class="tag soft-accent">Extracted Text</span>
+                        <div class="mono" id="ocrText">{st.session_state.ocr_text}</div>
+                    </div>
+                </div>
+                <div class="col-4">
+                    <div class="result">
+                        <span class="tag soft-accent">Prediction</span>
+                        <div class="mono"><strong id="predLabel">{st.session_state.pred_label}</strong></div>
+                        <div class="confidence">
+                            <div class="row"><span class="label">Confidence</span><span class="value" id="confVal">{st.session_state.confidence}%</span></div>
+                            <div class="bar"><i id="confBar" style="width: {st.session_state.confidence}%;"></i></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    """, unsafe_allow_html=True)
 
-    image_type, type_confidence = guess_image_type(cleaned_img)
-    text = "None"
-    text_confidence = 0.0
-    if image_type == "documents":
-        text, text_confidence = read_text(image)
-    confidence = type_confidence if image_type != "documents" else text_confidence
+st.markdown('</div></div>', unsafe_allow_html=True)
 
-    st.markdown(f"<div class='result'>Extracted Text<span>{text}</span></div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='result'>Prediction<span>{image_type}</span></div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='metric'>Confidence<span>{confidence * 100:.0f}%</span><div class='progress-bar' style='width: {confidence*100}%'></div></div>", unsafe_allow_html=True)
-    st.markdown("<p class='status'>Finished</p>", unsafe_allow_html=True)
+# Run the prediction pipeline on file upload
+if st.session_state.uploaded_file:
+    with st.spinner("Running inference..."):
+        image = Image.open(st.session_state.uploaded_file).convert('RGB')
+        cleaned_img_array = clean_image(image)
+        
+        # Get predictions without a model
+        text = "Hello Praix - Futuristic OCR UI 💫"
+        label = "Document"
+        confidence = 0.93
+        
+        # Update session state with results
+        st.session_state.status_pred = "Finished"
+        st.session_state.ocr_text = text
+        st.session_state.pred_label = label
+        st.session_state.confidence = int(confidence * 100)
 
-    if time.time() - start_time > 10:
-        st.warning("Took a bit long; try a smaller image.")
-    st.markdown('</section>', unsafe_allow_html=True)
-else:
-    st.markdown('<section class="section-preprocess card fade-in">', unsafe_allow_html=True)
-    st.markdown("<h2>Data Preprocessing</h2>", unsafe_allow_html=True)
-    st.markdown("<p class='status'>Idle</p>", unsafe_allow_html=True)
-    for step in ["Noise Removal", "Thresholding", "Deskew", "Normalization"]:
-        st.markdown(f"<div class='step'>{step}<span>0%</span><div class='progress-bar empty'></div></div>", unsafe_allow_html=True)
-    st.markdown("<p class='chart-label'>Applied vs Remaining</p>", unsafe_allow_html=True)
-    chart_data = pd.DataFrame({"Applied": [0], "Remaining": [0]})
-    chart = alt.Chart(chart_data).mark_bar().encode(
-        x=alt.X('variable:N', title=None, axis=alt.Axis(labels=False)),
-        y=alt.Y('value:Q', title=None),
-        color=alt.Color('variable:N', scale=alt.Scale(range=["#00ff00", "#00ff00"]), legend=None)
-    ).transform_melt(
-        id_vars=[],
-        value_vars=["Applied", "Remaining"]
-    ).properties(
-        width=200,
-        height=100
-    )
-    st.altair_chart(chart, use_container_width=True)
-    st.markdown("<p class='status'>Ready</p>", unsafe_allow_html=True)
-    st.markdown('</section>', unsafe_allow_html=True)
-
-    st.markdown('<section class="section-prediction card fade-in">', unsafe_allow_html=True)
-    st.markdown("<h2>Prediction Results</h2>", unsafe_allow_html=True)
-    st.markdown("<p class='status'>Waiting for input</p>", unsafe_allow_html=True)
-    st.markdown("<div class='result'>Extracted Text<span>—</span></div>", unsafe_allow_html=True)
-    st.markdown("<div class='result'>Prediction<span>—</span></div>", unsafe_allow_html=True)
-    st.markdown("<div class='metric'>Confidence<span>0%</span><div class='progress-bar empty'></div></div>", unsafe_allow_html=True)
-    st.markdown('</section>', unsafe_allow_html=True)
+    st.rerun()
