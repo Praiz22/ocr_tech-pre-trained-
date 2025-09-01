@@ -1,8 +1,6 @@
 import streamlit as st
 import numpy as np
 from PIL import Image
-import pandas as pd
-import altair as alt
 import time
 from utils import clean_image, guess_image_type, perform_ocr
 
@@ -21,14 +19,21 @@ if 'uploaded_file' not in st.session_state:
     st.session_state.uploaded_file = None
 if 'threshold_value' not in st.session_state:
     st.session_state.threshold_value = 0
+if 'show_modal' not in st.session_state:
+    st.session_state.show_modal = False
+if 'show_upload' not in st.session_state:
+    st.session_state.show_upload = False
 
 # Load the app’s style from an external CSS file
 with open("style.css") as f:
     st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
+# Main wrapper for the gradient background
+st.markdown('<div class="main-wrapper">', unsafe_allow_html=True)
+st.markdown('<div class="glow"></div>', unsafe_allow_html=True)
+
 # Hero Section
 st.markdown("""
-    <div class="glow"></div>
     <div class="shell">
         <div class="hero fade-in">
             <div class="brand">
@@ -43,7 +48,7 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# Grid layout
+# Main app grid layout
 st.markdown('<div class="grid">', unsafe_allow_html=True)
 
 # Upload Panel (Column 12)
@@ -64,6 +69,12 @@ uploaded_file = st.file_uploader("", type=["jpg", "png", "jpeg"], label_visibili
 if uploaded_file:
     st.session_state.uploaded_file = uploaded_file
 
+# Placeholder for the uploaded image preview
+if st.session_state.uploaded_file:
+    st.markdown('<section class="card col-12 fade-in"><h3>Image Preview</h3></section>', unsafe_allow_html=True)
+    image = Image.open(st.session_state.uploaded_file)
+    st.image(image, caption="Your Uploaded Image", use_column_width=True)
+
 # Preprocessing Panel (Column 8)
 with st.container():
     st.markdown(f"""
@@ -74,24 +85,23 @@ with st.container():
             </div>
     """, unsafe_allow_html=True)
 
-    # Placeholder for displaying the processed image
+    status_placeholder = st.empty()
+    image_placeholder = st.empty()
+    
     if st.session_state.uploaded_file:
+        status_placeholder.markdown("<p>Processing...</p>")
         image = Image.open(st.session_state.uploaded_file).convert('RGB')
         
-        with st.spinner("Processing..."):
+        # Simulate processing steps with animation
+        with st.spinner("Step 1: Noise Removal..."):
+            time.sleep(1)
+        
+        with st.spinner("Step 2: Binarization..."):
             cleaned_img_array, threshold_val = clean_image(image)
         
         st.session_state.threshold_value = int(threshold_val * 100)
         
-        chart_data = pd.DataFrame({
-            "Applied": [st.session_state.threshold_value],
-            "Remaining": [100 - st.session_state.threshold_value]
-        })
-        
-        chart = alt.Chart(chart_data).mark_arc(outerRadius=50).encode(
-            theta=alt.Theta("value", stack=True),
-            color=alt.Color("variable", scale=alt.Scale(range=["#ff7a18", "#f0f0f0"])),
-        ).properties(width=120, height=120)
+        status_placeholder.markdown("<p>Ready</p>")
         
         st.markdown(f"""
             <div class="metrics">
@@ -99,13 +109,9 @@ with st.container():
                     <div class="row"><span class="label">Noise Removal</span><span class="value">100%</span></div>
                     <div class="bar"><i style="width: 100%;"></i></div>
                 </div>
-                <div class="metric chart-card">
-                    <div class="row" style="width:100%;justify-content:space-between;align-items:center;">
-                        <span class="label">Thresholding</span><span class="value">{st.session_state.threshold_value}%</span>
-                    </div>
-                    <div class="chart-wrap">
-                        <div id="thresholdChart"></div>
-                    </div>
+                <div class="metric">
+                    <div class="row"><span class="label">Thresholding</span><span class="value">{st.session_state.threshold_value}%</span></div>
+                    <div class="bar"><i style="width: {st.session_state.threshold_value}%;"></i></div>
                 </div>
                 <div class="metric">
                     <div class="row"><span class="label">Deskew</span><span class="value">100%</span></div>
@@ -118,8 +124,6 @@ with st.container():
             </div>
         """, unsafe_allow_html=True)
         
-        st.altair_chart(chart)
-
         st.image(cleaned_img_array, caption="Processed Image", use_column_width=True)
     
     st.markdown('</section>', unsafe_allow_html=True)
@@ -173,12 +177,35 @@ if st.session_state.uploaded_file:
 
     st.rerun()
 
+# How-to Demo Modal
+st.markdown("""
+<div class="modal-overlay" id="modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>How to Use</h3>
+            <span class="modal-close-btn">&times;</span>
+        </div>
+        <div class="modal-body">
+            <p><strong>1. Upload Image:</strong> Click 'Choose File' or drag and drop an image of a document or text.</p>
+            <p><strong>2. Watch it Process:</strong> The app will show a live-action stream of data preprocessing and analysis.</p>
+            <p><strong>3. See the Results:</strong> The final extracted text, a predicted document type, and a confidence score will be displayed.</p>
+            <div class="animated-dots">
+                <span></span><span></span><span></span>
+            </div>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
 # Add JavaScript to link the custom buttons and styling to the Streamlit components
 st.markdown("""
 <script>
     const filePicker = parent.document.querySelector('.stFileUploader > div > label > button');
     const pickFileButton = document.querySelector('.pick-file');
     const dropZone = document.querySelector('.drop');
+    const startDemoButton = document.querySelector('.start-demo');
+    const modal = document.getElementById('modal');
+    const modalCloseBtn = document.querySelector('.modal-close-btn');
 
     if (filePicker && pickFileButton) {
         pickFileButton.onclick = () => {
@@ -199,15 +226,26 @@ st.markdown("""
         dropZone.ondrop = (e) => {
             e.preventDefault();
             dropZone.classList.remove('dragover');
-            // The dropped file is already handled by Streamlit's file_uploader
+            // Streamlit handles the file via the hidden input
         };
     }
 
-    const startDemoButton = document.querySelector('.start-demo');
-    if (startDemoButton && filePicker) {
+    if (startDemoButton) {
         startDemoButton.onclick = () => {
-            filePicker.click();
+            modal.style.display = "block";
         };
+    }
+
+    if (modalCloseBtn) {
+        modalCloseBtn.onclick = () => {
+            modal.style.display = "none";
+        };
+    }
+
+    window.onclick = function(event) {
+        if (event.target == modal) {
+            modal.style.display = "none";
+        }
     }
 </script>
 """, unsafe_allow_html=True)
