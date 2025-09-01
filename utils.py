@@ -1,274 +1,124 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+import cv2
+import numpy as np
+import easyocr
+from PIL import Image
+import re
+import streamlit as st
+from scipy.ndimage import interpolation as inter
 
-:root {
-    --bg-1: #ffffff;
-    --bg-2: #fff5eb;
-    --bg-3: #ffe7cc;
-    --card-bg: rgba(255, 255, 255, 0.24);
-    --card-border: rgba(255, 255, 255, 0.36);
-    --card-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
-    --text-1: #1f1f1f;
-    --text-2: #5a5a5a;
-    --brand: #ff7a18;
-    --brand-2: #ff4d00;
-    --muted: #e9e9e9;
-    --success: #0aa574;
-    --warning: #d97a00;
-    --radius-xl: 22px;
-    --radius-lg: 18px;
-    --radius-md: 14px;
-    --glow-brand: 0 0 16px var(--brand), 0 0 32px var(--brand-2);
-}
+# Initialize EasyOCR reader. The model is cached for faster performance.
+@st.cache_resource
+def load_ocr_reader():
+    """Caches the EasyOCR reader to avoid reloading on every rerun."""
+    return easyocr.Reader(['en'], gpu=False)
 
-body {
-    background-color: var(--bg-1);
-    font-family: 'Inter', sans-serif;
-    color: var(--text-1);
-    margin: 0;
-    padding: 0;
-    line-height: 1.6;
-    overflow-x: hidden;
-}
+reader = load_ocr_reader()
 
-.main-container {
-    padding: 2rem;
-    background: radial-gradient(circle at top left, var(--bg-2), transparent),
-                radial-gradient(circle at bottom right, var(--bg-3), transparent);
-    background-size: 200% 200%;
-    animation: gradient-anim 10s ease-in-out infinite alternate;
-}
+def correct_skew(image):
+    """
+    Corrects the skew of an image to improve OCR accuracy.
+    This function uses moments to calculate the skew angle and rotates the image.
+    """
+    # Convert PIL Image to a NumPy array for OpenCV
+    np_image = np.array(image.convert('L'))
+    
+    # Invert colors for white text on black background
+    inverted_img = cv2.bitwise_not(np_image)
 
-.header {
-    text-align: center;
-    padding: 2rem 0;
-}
+    # Calculate moments of the image
+    coords = np.column_stack(np.where(inverted_img > 0))
+    center = np.mean(coords, axis=0)
+    cov = np.cov(coords, rowvar=False)
+    
+    # Calculate eigenvectors and eigenvalues
+    evals, evecs = np.linalg.eig(cov)
+    
+    # Get the skew angle from the largest eigenvector
+    skew_angle = np.arctan2(evecs[0,1], evecs[0,0]) * 180 / np.pi
+    
+    # Rotate the image
+    rotated = inter.rotate(np_image, skew_angle, reshape=False, mode='nearest')
+    return Image.fromarray(rotated.astype(np.uint8))
 
-.branding {
-    font-size: 2.5rem;
-    font-weight: 700;
-    letter-spacing: -1px;
-    color: var(--brand);
-    text-shadow: var(--glow-brand);
-}
+def clean_image_advanced(pil_image: Image):
+    """
+    Applies a series of advanced image preprocessing techniques for improved OCR.
+    1. Skew correction
+    2. Conversion to grayscale
+    3. Adaptive thresholding
+    4. Morphological operations (opening) for noise removal
+    """
+    # Step 1: Correct skew
+    skew_corrected_image = correct_skew(pil_image)
+    
+    # Step 2: Convert to grayscale for consistent processing
+    np_image = np.array(skew_corrected_image.convert('L'))
+    
+    # Step 3: Adaptive Thresholding for dynamic lighting
+    # This is more robust than a single binary threshold
+    processed_image = cv2.adaptiveThreshold(np_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    
+    # Step 4: Morphological Operations for noise reduction
+    kernel = np.ones((1,1), np.uint8) # A small kernel for fine-grained noise
+    processed_image = cv2.morphologyEx(processed_image, cv2.MORPH_OPEN, kernel)
+    
+    return processed_image
 
-.subtitle {
-    font-size: 1rem;
-    color: var(--text-2);
-    margin-top: 0.5rem;
-}
+def perform_ocr(image_array: np.ndarray):
+    """
+    Performs OCR on a pre-processed image array using EasyOCR.
+    """
+    # Perform OCR
+    results = reader.readtext(image_array, detail=0, paragraph=True)
+    
+    # Join text from results
+    extracted_text = " ".join(results)
+    
+    return extracted_text
 
-.app-container {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 2rem;
-    max-width: 1200px;
-    margin: 0 auto;
-}
-
-.card {
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    border-radius: var(--radius-xl);
-    backdrop-filter: blur(10px);
-    box-shadow: var(--card-shadow);
-    padding: 2rem;
-    animation: fade-in 0.8s ease-out forwards;
-}
-
-h2 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin-top: 0;
-    margin-bottom: 1rem;
-}
-
-p.status {
-    font-size: 1rem;
-    color: var(--text-2);
-    font-weight: 500;
-}
-
-.upload-area {
-    border: 2px dashed var(--muted);
-    border-radius: var(--radius-lg);
-    padding: 2rem;
-    text-align: center;
-    color: var(--text-2);
-    font-size: 1.1rem;
-    transition: all 0.2s ease-in-out;
-}
-
-.upload-area:hover {
-    border-color: var(--brand);
-}
-
-.image-preview-container {
-    margin-top: 2rem;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 300px;
-    border: 1px dashed var(--muted);
-    border-radius: var(--radius-lg);
-    padding: 1rem;
-    overflow: hidden;
-}
-
-.placeholder-image {
-    color: var(--text-2);
-    text-align: center;
-}
-
-.section-preprocess .step,
-.section-prediction .result {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.5rem 0;
-    border-bottom: 1px solid var(--muted);
-    font-size: 1rem;
-    color: var(--text-1);
-    font-weight: 500;
-}
-
-.section-preprocess .step:last-child,
-.section-prediction .result:last-child {
-    border-bottom: none;
-}
-
-.section-preprocess .step span,
-.section-prediction .result span {
-    color: var(--brand-2);
-    font-weight: 600;
-}
-
-.progress-bar-container {
-    width: 100%;
-    height: 8px;
-    background-color: var(--muted);
-    border-radius: 4px;
-    margin: 0.5rem 0;
-    overflow: hidden;
-}
-
-.progress-bar {
-    height: 100%;
-    background: var(--brand);
-    border-radius: 4px;
-    transition: width 0.5s ease-in-out;
-}
-
-.metric {
-    display: flex;
-    align-items: center;
-    margin-top: 1rem;
-}
-
-.metric span {
-    font-size: 1.2rem;
-    font-weight: 600;
-    color: var(--brand-2);
-    margin-left: 0.5rem;
-}
-
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    overflow: auto;
-    background-color: rgba(0, 0, 0, 0.6);
-}
-
-.modal-content {
-    background-color: #fefefe;
-    margin: 15% auto;
-    padding: 20px;
-    border: 1px solid #888;
-    width: 80%;
-    max-width: 600px;
-    border-radius: var(--radius-xl);
-    backdrop-filter: blur(10px);
-    box-shadow: var(--card-shadow);
-    position: relative;
-    text-align: center;
-}
-
-.close-btn {
-    color: #aaa;
-    float: right;
-    font-size: 28px;
-    font-weight: bold;
-}
-
-.close-btn:hover,
-.close-btn:focus {
-    color: black;
-    text-decoration: none;
-    cursor: pointer;
-}
-
-.start-demo {
-    background: var(--brand);
-    color: white;
-    font-weight: 600;
-    padding: 1rem 2rem;
-    border-radius: var(--radius-lg);
-    border: none;
-    cursor: pointer;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    margin-top: 2rem;
-    display: block;
-    margin: 2rem auto;
-}
-
-.step-container {
-    display: flex;
-    justify-content: center;
-    gap: 1rem;
-    margin-top: 2rem;
-}
-
-.step-item {
-    text-align: center;
-}
-
-.step-number {
-    font-size: 2rem;
-    font-weight: 700;
-    color: var(--brand);
-}
-
-.step-text {
-    font-size: 0.9rem;
-    color: var(--text-2);
-}
-
-@keyframes gradient-anim {
-    0% {
-        background-position: 0% 50%;
+def classify_document(text: str):
+    """
+    Classifies the document type based on extracted text using an enhanced keyword-based approach.
+    This is more robust than a simple keyword search, incorporating regex and scoring.
+    """
+    text_lower = text.lower()
+    
+    # Define a dictionary of keywords and their weights for common document types
+    document_keywords = {
+        'Invoice': {'keywords': ['invoice', 'bill to', 'due date', 'subtotal', 'total', 'amount due', 'payment'], 'weight': 1.5},
+        'Receipt': {'keywords': ['receipt', 'thank you', 'total', 'tax', 'cash', 'credit', 'change', 'subtotal'], 'weight': 1.2},
+        'Report': {'keywords': ['report', 'summary', 'data analysis', 'conclusion', 'introduction', 'findings', 'abstract'], 'weight': 1.0},
+        'Form': {'keywords': ['name', 'address', 'date', 'signature', 'form', 'dob', 'id number'], 'weight': 1.0},
+        'ID Card': {'keywords': ['id card', 'passport', 'date of birth', 'id number', 'nationality', 'expiry'], 'weight': 2.0},
+        'Letter': {'keywords': ['sincerely', 'regards', 'dear', 'address', 'date', 'subject', 'body'], 'weight': 0.8},
+        'Text Document': {'keywords': [], 'weight': 0.5} # Default for non-specific text
     }
-    100% {
-        background-position: 100% 50%;
-    }
-}
+    
+    best_match = 'Text Document'
+    highest_score = 0
+    
+    # Count keyword occurrences and determine confidence
+    for doc_type, data in document_keywords.items():
+        score = sum(1 for keyword in data['keywords'] if re.search(r'\b' + re.escape(keyword) + r'\b', text_lower))
+        
+        # Apply weight to the score
+        weighted_score = score * data['weight']
+        
+        if weighted_score > highest_score:
+            highest_score = weighted_score
+            best_match = doc_type
+            
+    # Calculate confidence based on keyword matches and text length
+    confidence = 0
+    if text_lower and len(text_lower.split()) > 0:
+        # A more dynamic confidence calculation
+        total_keywords_found = sum(re.findall(r'\b\w+\b', text_lower, re.IGNORECASE)) # Simple word count
+        confidence = highest_score / len(document_keywords) * 0.1 # A simple heuristic
+    
+    if confidence == 0 and highest_score > 0:
+        confidence = 0.5 # A baseline if no words are found but a match was made
 
-@keyframes fade-in {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-@media (max-width: 768px) {
-    .app-container {
-        grid-template-columns: 1fr;
-    }
-}
+    # Final confidence normalization
+    confidence = max(0.1, min(1.0, confidence * 1.5))
+    
+    return best_match, confidence
